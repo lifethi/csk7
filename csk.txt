@@ -1,0 +1,2013 @@
+2 pass assembler
+input.txt:
+
+START 100
+INPSTR DS 50
+COUNT DC 0
+READ INPSTR
+MOVER AREG ='0'
+MOVEM AREG COUNT
+LOOP MOVER BREG INPSTR
+ADD BREG AREG
+COMP BREG ='0'
+BC 8 ENDLOOP
+ADD AREG ='1'
+MOVEM BREG COUNT
+ADD BREG ='1'
+BC 7 LOOP
+ENDLOOP 
+PRINT COUNT
+END
+
+
+
+symbol table:
+Symbol Table:
+INPSTR	102
+COUNT	101
+LOOP	112
+ENDLOOP	108
+
+pool table:
+Pool Table:
+01 
+
+literal table:
+Literal Table:
+='0'	114
+='1'	115
+	0
+
+intermediate.txt:
+100	(AD, 01)	(C, 100)
+100	(DL, 01)	 50
+101	(DL, 02)	 0
+102	(IS, 10)	(S, 2)
+103	(IS, 01)	(1)	(L, 1)
+104	(IS, 02)	(1)	(S, 2)
+105	(IS, 01)	(2)	(L, 0)
+106	(IS, 03)	(2)	(S, 0)
+107	(IS, 08)	(2)	(L, 1)
+108	(IS, 07)	(S, 9)
+109	(IS, 03)	(1)	(L, 2)
+110	(IS, 02)	(2)	(S, 2)
+111	(IS, 03)	(2)	(L, 2)
+112	(IS, 07)	(S, 9)
+113	(IS, 09)	(S, 1)
+
+
+
+pass 1.c:
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+typedef struct {
+    char symbol[10];
+    int address;
+} syymbol;
+
+typedef struct {
+    char literal[10]; 
+    int address;
+} littab;
+
+typedef struct {
+    char mnemonic[10];
+    int opcode;
+} mot;
+
+typedef struct {
+    char reg[10];
+    int code;
+} registertab;
+
+
+mot MOT[] = {
+    {"MOVER", 1}, {"MOVEM", 2}, {"ADD", 3}, {"SUB", 4}, {"MULT", 5},
+    {"DIV", 6}, {"BC", 7}, {"COMP", 8}, {"PRINT", 9}, {"READ", 10} ,{"SHIFT",11},{"BC",12}
+};
+mot POT[] = {
+    {"START", 1}, {"END", 2}, {"EQU", 3}, {"ORIGIN", 4}, {"LTORG", 5}
+};
+mot DL[] = {
+    {"DS", 1}, {"DC", 2}
+};
+registertab registers[] = {
+    {"AREG", 1}, {"BREG", 2}, {"CREG", 3}, {"DREG", 4}
+};
+
+syymbol symtab[50];
+littab litt[50];
+int symcount = 0, litcount = 0, locctr = 0;
+
+int searsys(char *symbol) {
+    for (int i = 0; i < symcount; i++) {
+        if (strcmp(symtab[i].symbol, symbol) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int searl(char *literal) {
+    for (int i = 0; i < litcount; i++) {
+        if (strcmp(litt[i].literal, literal) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int gop(char *mnemonic, mot table[], int size) {
+    for (int i = 0; i < size; i++) {
+        if (strcmp(table[i].mnemonic, mnemonic) == 0) {
+            return table[i].opcode;
+        }
+    }
+    return -1;
+}
+
+
+int grp(char *reg) {
+    for (int i = 0; i < 4; i++) {
+        if (strcmp(registers[i].reg, reg) == 0) {
+            return registers[i].code;
+        }
+    }
+    return -1;
+}
+
+
+void processLine(char *line, FILE *intermediate) {
+    char label[10] = "", opcode[10] = "", operand1[10] = "", operand2[10] = "";
+    int fields = sscanf(line, "%s %s %s %s", label, opcode, operand1, operand2);    
+    if (fields >= 3 && strlen(label) > 0 && strcmp(opcode, "START") != 0 && strcmp(opcode, "END") != 0  && strcmp(label, "END") != 0 && strcmp(label, "START") != 0) {
+        
+        int symIndex = searsys(label);
+        if (symIndex == -1) {
+            strcpy(symtab[symcount].symbol, label);
+            symtab[symcount].address = locctr;
+            symcount++;
+        } else {
+            symtab[symIndex].address = locctr;
+        }
+    }
+    else if (fields>=3 && strlen(label) > 0 && strcmp(opcode, "START") != 0 && strcmp(opcode, "END") != 0 && strcmp(label, "END") != 0 && strcmp(label, "START") != 0) {
+        int symIndex = searsys(label);
+        if (symIndex == -1) {
+            strcpy(symtab[symcount].symbol, label);
+            symtab[symcount].address = locctr;
+            symcount++;
+        } else {
+            symtab[symIndex].address = locctr;
+        }
+    }
+    if (fields==3 && operand1[0] == '='){
+        int opcodeVal = gop(label, MOT, 11);        
+        if (opcodeVal != -1) {
+            int regCode = grp(opcode);
+            int litIndex = searl(operand1);
+            if (litIndex == -1 && operand1[0] == '=') {
+                strcpy(litt[litcount].literal, operand1);
+                litt[litcount].address = 0; 
+                litcount++;
+                litIndex = litcount - 1;
+            }
+            fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\t(L, %d)\n", locctr, opcodeVal, regCode, litIndex + 1);
+            locctr++;
+        } else {
+            
+            opcodeVal = gop(opcode, POT, 5);
+            if (opcodeVal != -1) {
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                if (strcmp(opcode, "START") == 0 || strcmp(opcode, "ORIGIN") == 0) {
+                    locctr = atoi(operand1);
+                    
+                }
+            } else {
+                opcodeVal = gop(opcode, DL, 2);
+                if (opcodeVal != -1) {
+                    fprintf(intermediate, "%d\t(DL, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                    locctr += atoi(operand1);
+                    
+                }
+            }
+        }
+    }
+    else if (fields==3 && operand1[0] != '=' && (label[0]!='B' && label[1]!='C')){
+        int opcodeVal = gop(label, MOT, 11);        
+        if (opcodeVal != -1) {
+            int regCode = grp(opcode);           
+            fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\t(S, %d)\n", locctr, opcodeVal, regCode, searsys(operand1)+1);
+            locctr++;
+        } else if (gop(opcode, POT, 5)==3){
+            
+        }else {
+            
+            opcodeVal = gop(opcode, POT, 5);
+            if (opcodeVal != -1) {
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                if (strcmp(opcode, "START") == 0 || strcmp(opcode, "ORIGIN") == 0) {
+                    locctr = atoi(operand1);
+                    
+                }
+            } else {
+                opcodeVal = gop(opcode, DL, 2);
+                if (opcodeVal != -1) {
+                   int symIndex = searsys(label);                
+                   if (symIndex == -1) {                        
+                        strcpy(symtab[symcount].symbol, label);
+                        symtab[symcount].address = locctr;
+                        symcount++;
+                    } else {
+                        symtab[symIndex].address = locctr;
+                    }
+                    fprintf(intermediate, "%d\t(DL, %02d)\t %s\n", locctr, opcodeVal, operand1);
+                   
+                   locctr ++;
+                    
+                }
+            }
+        }
+    }
+    else if (fields >= 3) {
+              
+        int opcodeVal = gop(opcode, MOT, 11);
+        if (opcodeVal != -1) {
+            int regCode = grp(operand1);
+            int litIndex = searl(operand2);
+            if (litIndex == -1 && operand2[0] == '=') {
+                strcpy(litt[litcount].literal, operand2);
+                litt[litcount].address = 0; 
+                litcount++;
+                litIndex = litcount - 1;
+            }
+            fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\t(L, %d)\n", locctr, opcodeVal, regCode, litIndex + 1);
+            locctr++;
+        } else {
+            
+            opcodeVal = gop(opcode, POT, 5);
+            if (opcodeVal != -1) {
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                if (strcmp(opcode, "START") == 0 || strcmp(opcode, "ORIGIN") == 0) {
+                    locctr = atoi(operand1);
+                    
+                }
+            } else if (strcmp(label, "BC") == 0) {
+                   int conditionCode = atoi(opcode);
+                   int symIndex = searsys(operand1);
+                   if (symIndex == -1) {                        
+                        strcpy(symtab[symcount].symbol, operand1);
+                        symtab[symcount].address = locctr;
+                        symcount++;
+                    } else {
+                        symtab[symIndex].address = locctr;
+                    }
+                        fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, gop(label, MOT, 11), symcount);
+                        locctr++;
+                    
+                }else {
+                opcodeVal = gop(opcode, DL, 2);
+                if (opcodeVal != -1) {
+                   int symIndex = searsys(label);                
+                   if (symIndex == -1) {                        
+                        strcpy(symtab[symcount].symbol, label);
+                        symtab[symcount].address = locctr;
+                        symcount++;
+                    } else {
+                        symtab[symIndex].address = locctr;
+                    }
+                    fprintf(intermediate, "%d\t(DL, %02d)\t %s\n", locctr, opcodeVal, operand1);
+                   
+                   locctr ++;
+                    
+                    
+                }
+            }
+        }
+    } else if (fields == 2) {        
+        int opcodeVal = gop(label, POT, 5);
+        if (strcmp(label, "PRINT") == 0) {
+            int regCode = grp(opcode); 
+            if(regCode!=-1){
+                fprintf(intermediate, "%d\t(IS, 09)\t(S, %d)\n", locctr, regCode);
+                locctr++;
+            }else if (searsys(opcode)!=-1){
+                fprintf(intermediate, "%d\t(IS, 09)\t(S, %d)\n", locctr,searsys(opcode));
+                locctr++;
+            }else if (searl(opcode)!=-1){
+                fprintf(intermediate, "%d\t(IS, 09)\t(L, %d)\n", locctr, searl(opcode));
+                locctr++;
+            }
+        }
+        else if (opcodeVal != -1) {
+            if ( strcmp(label, "ORIGIN") == 0) {
+                locctr = atoi(opcode);
+                
+            }
+            else if  (strcmp(label, "START") == 0 ){
+                locctr = atoi(opcode);
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, opcode);
+            }
+        } else if (gop(label, MOT, 11)==10){
+            
+            int symIndex = searsys(opcode);            
+            if (symIndex == -1) {                
+                strcpy(symtab[symcount].symbol, opcode);
+                symtab[symcount].address = locctr;
+                symcount++;
+            } else {
+                symtab[symIndex].address = locctr;
+            }
+            fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, gop(label, MOT, 11), symcount);
+            locctr++;
+        }else if(gop(label, MOT, 11)!=-1){
+            
+            if(opcode[0]!='='){                
+                opcodeVal = gop(label, MOT, 11);
+                int reg=0;
+                reg=grp(opcode);
+                if(reg==-1){
+                    fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, opcodeVal, opcode);
+                    locctr++;
+                }else{
+                    fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, opcodeVal, reg);
+                    locctr++;
+                }
+             }else{
+                int litIndex = searl(opcode);
+                opcodeVal = gop(label, MOT, 11);
+                if (litIndex == -1 && opcode[0] == '=') {
+                    strcpy(litt[litcount].literal, opcode);
+                    litt[litcount].address = 0; 
+                    litcount++;
+                    litIndex = litcount - 1;
+                }
+                fprintf(intermediate, "%d\t(IS, %02d)\t(L, %d)\n", locctr, opcodeVal, litIndex + 1);
+                locctr++;
+            }
+        }else {
+            opcodeVal = gop(label, DL, 2);
+            if (opcodeVal != -1) {                
+                fprintf(intermediate, "%d\t(DL, %02d)\t(C, %s)\n", locctr, opcodeVal, opcode);
+                locctr += atoi(opcode);
+                
+            } else {
+                opcodeVal = gop(label, MOT, 11);
+                if (opcodeVal != -1) {
+                    int regCode = grp(opcode);
+                    fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\n", locctr, opcodeVal, regCode);
+                }
+            }
+        }
+        
+    } else if (fields == 1) {
+     
+        int opcodeVal = gop(label, POT, 5);
+       
+        if (opcodeVal != -1) {
+            if (strcmp(label, "LTORG") == 0||strcmp(label, "END") == 0) {                
+                for (int i = 0; i < litcount; i++) {
+                    if (litt[i].address == 0) {
+                        litt[i].address = locctr;
+                        // fprintf(intermediate, "%d\t(AD, %02d)\t%d\n", locctr, opcodeVal, litt[i].address);
+                        locctr++;
+                    }
+                }
+            }
+        } 
+    }else if (strcmp(label, "BC") == 0) {
+    
+
+            int conditionCode = atoi(operand1);
+            if (conditionCode >= 1 && conditionCode <= 12) {
+                fprintf(intermediate, "%d\t(IS, %02d)\t(C, %d)\n", locctr, gop(opcode, MOT, 11), conditionCode);
+                locctr++;
+            } 
+        }
+    else {
+            fprintf(intermediate, "%d\t%s\n", locctr, label);
+            locctr++;
+        }
+    }
+
+void writeLiteralTableToFile() {
+    FILE *file = fopen("literal.txt", "w"); 
+
+    if (file == NULL) {
+        printf("Error opening file for writing.\n");
+        return;
+    }
+    
+    fprintf(file, "Literal Table:\n");
+    for (int i = 0; i <= litcount; i++) {
+        fprintf(file, "%s\t%d\n", litt[i].literal, litt[i].address); 
+    }
+    fclose(file);
+  
+}
+
+
+void writePoolTableToFile() {
+    // Open file in write mode
+    FILE *poolFile = fopen("pooltable.txt", "w");
+    if (poolFile == NULL) {
+        printf("Error: Could not open pooltable.txt for writing\n");
+        return;
+    }
+
+    // Print predefined statements into the pool table file
+    fprintf(poolFile, "Pool Table:\n");
+    fprintf(poolFile, "01 \n");
+
+
+    // Close file
+    fclose(poolFile);
+
+   
+}
+
+void writeSymbolTableToFile() {
+    FILE *symbolFile = fopen("symbol.txt", "w");
+    if (!symbolFile) {
+        perror("Error opening symbol.txt file");
+        return;
+    }
+
+    fprintf(symbolFile, "Symbol Table:\n");
+    for (int i = 0; i < symcount; i++) {
+        
+        if (gop(symtab[i].symbol, MOT, 11) == -1 && gop(symtab[i].symbol, DL, 2) == -1) {
+            fprintf(symbolFile, "%s\t%d\n", symtab[i].symbol, symtab[i].address);
+        }
+    }
+
+    fclose(symbolFile);  
+    printf("Symbol Table written to symbol.txt\n");
+}
+
+int main() {
+    FILE *input = fopen("input.txt", "r");
+    FILE *intermediate = fopen("intermediate.txt", "w");
+    
+
+    char line[50];
+    while (fgets(line, sizeof(line), input)) {
+        processLine(line, intermediate);
+    }
+
+    fclose(input);
+    fclose(intermediate);
+    
+    intermediate = fopen("intermediate.txt", "r");
+    
+    fclose(intermediate);
+    
+
+
+        intermediate = fopen("intermediate.txt", "r");
+    if (!intermediate) {
+        printf("Error reopening intermediate file!\n");
+        return 1;
+    }
+
+    printf("Intermediate Code:\n");
+    while (fgets(line, sizeof(line), intermediate)) {
+        printf("%s", line);
+    }
+
+    fclose(intermediate);
+
+    writeSymbolTableToFile();
+    printf("\nSymbol Table:\n");
+    for (int i = 0; i < symcount; i++) {
+        if (gop(symtab[i].symbol, MOT, 11) == -1 && gop(symtab[i].symbol, DL, 2) == -1) {
+            printf("%s\t%d\n", symtab[i].symbol, symtab[i].address);
+        }
+    }
+
+    writeLiteralTableToFile();
+    printf("\n");
+    printf("Literal Table:\n");
+    for (int i = 0; i <= litcount; i++) {
+        printf("%s\t%d\n", litt[i].literal, litt[i].address);
+    }   
+    writePoolTableToFile();
+
+    return 0;
+}
+
+pass2.c:
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+typedef struct {
+    char symbol[10];
+    int address;
+} syymbol;
+
+typedef struct {
+    char literal[10];
+    int address;
+} littab;
+
+typedef struct {
+    char mnemonic[10];
+    int opcode;
+} mot;
+
+typedef struct {
+    char reg[10];
+    int code;
+} registertab;
+
+
+mot MOT[] = {
+    {"MOVER", 1}, {"MOVEM", 2}, {"ADD", 3}, {"SUB", 4}, {"MULT", 5},
+    {"DIV", 6}, {"BC", 7}, {"COMP", 8}, {"PRINT", 9}, {"READ", 10} ,{"SHIFT",11},{"BC",12}
+};
+mot POT[] = {
+    {"START", 1}, {"END", 2}, {"EQU", 3}, {"ORIGIN", 4}, {"LTORG", 5}
+};
+mot DL[] = {
+    {"DS", 1}, {"DC", 2}
+};
+registertab registers[] = {
+    {"AREG", 1}, {"BREG", 2}, {"CREG", 3}, {"DREG", 4}
+};
+
+syymbol symtab[50];
+littab litt[50];
+int symcount = 0, litcount = 0, locctr = 0;
+
+int searsys(char *symbol) {
+    for (int i = 0; i < symcount; i++) {
+        if (strcmp(symtab[i].symbol, symbol) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int searl(char *literal) {
+    for (int i = 0; i < litcount; i++) {
+        if (strcmp(litt[i].literal, literal) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int gop(char *mnemonic, mot table[], int size) {
+    for (int i = 0; i < size; i++) {
+        if (strcmp(table[i].mnemonic, mnemonic) == 0) {
+            return table[i].opcode;
+        }
+    }
+    return -1;
+}
+
+
+int grp(char *reg) {
+    for (int i = 0; i < 4; i++) {
+        if (strcmp(registers[i].reg, reg) == 0) {
+            return registers[i].code;
+        }
+    }
+    return -1;
+}
+
+
+void processLine(char *line, FILE *intermediate) {
+    char label[10] = "", opcode[10] = "", operand1[10] = "", operand2[10] = "";
+    int fields = sscanf(line, "%s %s %s %s", label, opcode, operand1, operand2);    
+    if (fields >= 3 && strlen(label) > 0 && strcmp(opcode, "START") != 0 && strcmp(opcode, "END") != 0  && strcmp(label, "END") != 0 && strcmp(label, "START") != 0) {
+        
+        int symIndex = searsys(label);
+        if (symIndex == -1) {
+            strcpy(symtab[symcount].symbol, label);
+            symtab[symcount].address = locctr;
+            symcount++;
+        } else {
+            symtab[symIndex].address = locctr;
+        }
+    }
+    else if (fields>=3 && strlen(label) > 0 && strcmp(opcode, "START") != 0 && strcmp(opcode, "END") != 0 && strcmp(label, "END") != 0 && strcmp(label, "START") != 0) {
+        int symIndex = searsys(label);
+        if (symIndex == -1) {
+            strcpy(symtab[symcount].symbol, label);
+            symtab[symcount].address = locctr;
+            symcount++;
+        } else {
+            symtab[symIndex].address = locctr;
+        }
+    }
+    if (fields==3 && operand1[0] == '='){
+        int opcodeVal = gop(label, MOT, 11);        
+        if (opcodeVal != -1) {
+            int regCode = grp(opcode);
+            int litIndex = searl(operand1);
+            if (litIndex == -1 && operand1[0] == '=') {
+                strcpy(litt[litcount].literal, operand1);
+                litt[litcount].address = 0; 
+                litcount++;
+                litIndex = litcount - 1;
+            }
+            fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\t(L, %d)\n", locctr, opcodeVal, regCode, litIndex + 1);
+            locctr++;
+        } else {
+            
+            opcodeVal = gop(opcode, POT, 5);
+            if (opcodeVal != -1) {
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                if (strcmp(opcode, "START") == 0 || strcmp(opcode, "ORIGIN") == 0) {
+                    locctr = atoi(operand1);
+                    
+                }
+            } else {
+                opcodeVal = gop(opcode, DL, 2);
+                if (opcodeVal != -1) {
+                    fprintf(intermediate, "%d\t(DL, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                    locctr += atoi(operand1);
+                    
+                }
+            }
+        }
+    }
+    else if (fields==3 && operand1[0] != '=' && (label[0]!='B' && label[1]!='C')){
+        int opcodeVal = gop(label, MOT, 11);        
+        if (opcodeVal != -1) {
+            int regCode = grp(opcode);           
+            fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\t(S, %d)\n", locctr, opcodeVal, regCode, searsys(operand1)+1);
+            locctr++;
+        } else if (gop(opcode, POT, 5)==3){
+            
+        }else {
+            
+            opcodeVal = gop(opcode, POT, 5);
+            if (opcodeVal != -1) {
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                if (strcmp(opcode, "START") == 0 || strcmp(opcode, "ORIGIN") == 0) {
+                    locctr = atoi(operand1);
+                    
+                }
+            } else {
+                opcodeVal = gop(opcode, DL, 2);
+                if (opcodeVal != -1) {
+                   int symIndex = searsys(label);                
+                   if (symIndex == -1) {                        
+                        strcpy(symtab[symcount].symbol, label);
+                        symtab[symcount].address = locctr;
+                        symcount++;
+                    } else {
+                        symtab[symIndex].address = locctr;
+                    }
+                    fprintf(intermediate, "%d\t(DL, %02d)\t %s\n", locctr, opcodeVal, operand1);
+                   
+                   locctr ++;
+                    
+                }
+            }
+        }
+    }
+    else if (fields >= 3) {
+              
+        int opcodeVal = gop(opcode, MOT, 11);
+        if (opcodeVal != -1) {
+            int regCode = grp(operand1);
+            int litIndex = searl(operand2);
+            if (litIndex == -1 && operand2[0] == '=') {
+                strcpy(litt[litcount].literal, operand2);
+                litt[litcount].address = 0; 
+                litcount++;
+                litIndex = litcount - 1;
+            }
+            fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\t(L, %d)\n", locctr, opcodeVal, regCode, litIndex + 1);
+            locctr++;
+        } else {
+            
+            opcodeVal = gop(opcode, POT, 5);
+            if (opcodeVal != -1) {
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, operand1);
+                if (strcmp(opcode, "START") == 0 || strcmp(opcode, "ORIGIN") == 0) {
+                    locctr = atoi(operand1);
+                    
+                }
+            } else if (strcmp(label, "BC") == 0) {
+                   int conditionCode = atoi(opcode);
+                   int symIndex = searsys(operand1);
+                   if (symIndex == -1) {                        
+                        strcpy(symtab[symcount].symbol, operand1);
+                        symtab[symcount].address = locctr;
+                        symcount++;
+                    } else {
+                        symtab[symIndex].address = locctr;
+                    }
+                        fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, gop(label, MOT, 11), symcount);
+                        locctr++;
+                    
+                }else {
+                opcodeVal = gop(opcode, DL, 2);
+                if (opcodeVal != -1) {
+                   int symIndex = searsys(label);                
+                   if (symIndex == -1) {                        
+                        strcpy(symtab[symcount].symbol, label);
+                        symtab[symcount].address = locctr;
+                        symcount++;
+                    } else {
+                        symtab[symIndex].address = locctr;
+                    }
+                    fprintf(intermediate, "%d\t(DL, %02d)\t %s\n", locctr, opcodeVal, operand1);
+                   
+                   locctr ++;
+                    
+                    
+                }
+            }
+        }
+    } else if (fields == 2) {        
+        int opcodeVal = gop(label, POT, 5);
+        if (strcmp(label, "PRINT") == 0) {
+            int regCode = grp(opcode); 
+            if(regCode!=-1){
+                fprintf(intermediate, "%d\t(IS, 09)\t(S, %d)\n", locctr, regCode);
+                locctr++;
+            }else if (searsys(opcode)!=-1){
+                fprintf(intermediate, "%d\t(IS, 09)\t(S, %d)\n", locctr,searsys(opcode));
+                locctr++;
+            }else if (searl(opcode)!=-1){
+                fprintf(intermediate, "%d\t(IS, 09)\t(L, %d)\n", locctr, searl(opcode));
+                locctr++;
+            }
+        }
+        else if (opcodeVal != -1) {
+            if ( strcmp(label, "ORIGIN") == 0) {
+                locctr = atoi(opcode);
+                
+            }
+            else if  (strcmp(label, "START") == 0 ){
+                locctr = atoi(opcode);
+                fprintf(intermediate, "%d\t(AD, %02d)\t(C, %s)\n", locctr, opcodeVal, opcode);
+            }
+        } else if (gop(label, MOT, 11)==10){
+            
+            int symIndex = searsys(opcode);            
+            if (symIndex == -1) {                
+                strcpy(symtab[symcount].symbol, opcode);
+                symtab[symcount].address = locctr;
+                symcount++;
+            } else {
+                symtab[symIndex].address = locctr;
+            }
+            fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, gop(label, MOT, 11), symcount);
+            locctr++;
+        }else if(gop(label, MOT, 11)!=-1){
+            
+            if(opcode[0]!='='){                
+                opcodeVal = gop(label, MOT, 11);
+                int reg=0;
+                reg=grp(opcode);
+                if(reg==-1){
+                    fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, opcodeVal, opcode);
+                    locctr++;
+                }else{
+                    fprintf(intermediate, "%d\t(IS, %02d)\t(S, %d)\n", locctr, opcodeVal, reg);
+                    locctr++;
+                }
+             }else{
+                int litIndex = searl(opcode);
+                opcodeVal = gop(label, MOT, 11);
+                if (litIndex == -1 && opcode[0] == '=') {
+                    strcpy(litt[litcount].literal, opcode);
+                    litt[litcount].address = 0; 
+                    litcount++;
+                    litIndex = litcount - 1;
+                }
+                fprintf(intermediate, "%d\t(IS, %02d)\t(L, %d)\n", locctr, opcodeVal, litIndex + 1);
+                locctr++;
+            }
+        }else {
+            opcodeVal = gop(label, DL, 2);
+            if (opcodeVal != -1) {                
+                fprintf(intermediate, "%d\t(DL, %02d)\t(C, %s)\n", locctr, opcodeVal, opcode);
+                locctr += atoi(opcode);
+                
+            } else {
+                opcodeVal = gop(label, MOT, 11);
+                if (opcodeVal != -1) {
+                    int regCode = grp(opcode);
+                    fprintf(intermediate, "%d\t(IS, %02d)\t(%d)\n", locctr, opcodeVal, regCode);
+                }
+            }
+        }
+        
+    } else if (fields == 1) {
+     
+        int opcodeVal = gop(label, POT, 5);
+       
+        if (opcodeVal != -1) {
+            if (strcmp(label, "LTORG") == 0||strcmp(label, "END") == 0) {                
+                for (int i = 0; i < litcount; i++) {
+                    if (litt[i].address == 0) {
+                        litt[i].address = locctr;
+                        // fprintf(intermediate, "%d\t(AD, %02d)\t%d\n", locctr, opcodeVal, litt[i].address);
+                        locctr++;
+                    }
+                }
+            }
+        } 
+    }else if (strcmp(label, "BC") == 0) {
+    
+
+            int conditionCode = atoi(operand1);
+            if (conditionCode >= 1 && conditionCode <= 12) {
+                fprintf(intermediate, "%d\t(IS, %02d)\t(C, %d)\n", locctr, gop(opcode, MOT, 11), conditionCode);
+                locctr++;
+            } 
+        }
+    else {
+            fprintf(intermediate, "%d\t%s\n", locctr, label);
+            locctr++;
+        }
+    }
+
+
+
+void writeSymbolTableToFile() {
+    FILE *symbolFile = fopen("symbol.txt", "w");
+    if (!symbolFile) {
+        perror("Error opening symbol.txt file");
+        return;
+    }
+
+    fprintf(symbolFile, "Symbol Table:\n");
+    for (int i = 0; i < symcount; i++) {
+        
+        if (gop(symtab[i].symbol, MOT, 11) == -1 && gop(symtab[i].symbol, DL, 2) == -1) {
+            fprintf(symbolFile, "%s\t%d\n", symtab[i].symbol, symtab[i].address);
+        }
+    }
+
+    fclose(symbolFile);  
+    printf("Symbol Table written to symbol.txt\n");
+}
+
+void generateMachineCode(FILE *intermediate, FILE *machine) {
+    char line[50];
+    int address, opcode, regCode, operand;
+    int litIndex, symIndex;
+    char l[50];
+    int t=0,fl=0,k=0;
+
+
+    while (fgets(line, sizeof(line), intermediate)) {
+  
+        if (sscanf(line, "%d\t(IS, %02d)\t(%d)\t(S, %d)", &address, &opcode, &regCode, &operand) == 4) {
+            symIndex = operand - 1;
+            if (symIndex >= 0 && symIndex < symcount) {
+                if(regCode){                   
+                    fprintf(machine, "%d %02d %d %d\n", address, opcode, regCode, symtab[symIndex].address);
+                }else{                    
+                    fprintf(machine, "%d %02d  %d\n", address, opcode, symtab[symIndex].address);
+                }
+            } else {                
+                fprintf(machine, "%d %02d %d %d\n", address, opcode, regCode, operand); 
+            }
+        } 
+        else if (sscanf(line, "%d\t(IS, %02d)\t(%d)\t(L, %d)", &address, &opcode, &regCode, &operand) == 4) {
+            litIndex = operand - 1;
+            if (litIndex >= 0 && litIndex < litcount) {
+                fprintf(machine, "%d %02d %d %d\n", address, opcode, regCode, litt[litIndex].address);
+            } else {
+                fprintf(machine, "%d %02d %d %d\n", address, opcode, regCode, operand); 
+            }
+        } 
+
+        else if (sscanf(line, "%d\t(IS, %02d)\t(S, %d)", &address, &opcode, &operand) == 3) {
+            symIndex = operand - 1;
+            if (symIndex >= 0 && symIndex < symcount) {
+                fprintf(machine, "%d %02d  %d\n", address, opcode,  symtab[symIndex].address);
+            } else {
+                fprintf(machine, "%d %02d  %d\n", address, opcode,  operand);
+            }
+        } 
+        
+        else if (sscanf(line, "%d\t(IS, %02d)\t(L, %d)", &address, &opcode, &operand) == 3) {
+            litIndex = operand - 1;
+            if (litIndex >= 0 && litIndex < litcount) {
+                fprintf(machine, "%d %02d  %d\n", address, opcode,  litt[litIndex].address);
+            } else {
+                fprintf(machine, "%d %02d  %d\n", address, opcode,  operand); 
+            }
+        } 
+
+        else if (sscanf(line, "%d\t(AD, %02d)\t(C, %s)", &address, &opcode, line) == 3) {
+            fprintf(machine, "%d %02d %s\n", address, opcode, line);
+        } 
+     
+        else if (sscanf(line, "%d\t(DL, %02d)\t %s", &address, &opcode, line) == 3) {
+            fprintf(machine, "%d %02d %s\n", address, opcode, line);
+        } 
+       
+        else if (sscanf(line, "%d\t(AD, %02d)", &address, &opcode) == 2) {
+           
+            fprintf(machine, "%d %d %s\n",address,opcode,litt[k].literal);
+            k++;
+        } 
+
+        else if (sscanf(line, "%d\t(DL, %02d)", &address, &opcode) == 2) {
+            fprintf(machine, "%d %02d\n", address, opcode);
+        } 
+    
+        else if (sscanf(line, "%d\t%s", &address,&opcode, line) == 2) {
+            fprintf(machine, "%d %d %d\n",address,k,litt[k].address);
+            printf("\nliterals %d %d\n",k,litt[k].address);
+            k++;
+        }
+    }
+}
+
+
+int main() {
+    FILE *input = fopen("input.txt", "r");
+    FILE *intermediate = fopen("intermediate.txt", "w");
+    FILE *machineCode = fopen("machineCode.txt", "w");
+
+    char line[50];
+    while (fgets(line, sizeof(line), input)) {
+        processLine(line, intermediate);
+    }
+
+    fclose(input);
+    fclose(intermediate);
+    
+    intermediate = fopen("intermediate.txt", "r");
+    generateMachineCode(intermediate, machineCode);
+
+    fclose(intermediate);
+    fclose(machineCode);
+
+
+        intermediate = fopen("intermediate.txt", "r");
+    if (!intermediate) {
+        printf("Error reopening intermediate file!\n");
+        return 1;
+    }
+
+    printf("Intermediate Code:\n");
+    while (fgets(line, sizeof(line), intermediate)) {
+        printf("%s", line);
+    }
+
+    fclose(intermediate);
+
+
+    printf("\nSymbol Table:\n");
+    for (int i = 0; i < symcount; i++) {
+        if (gop(symtab[i].symbol, MOT, 11) == -1 && gop(symtab[i].symbol, DL, 2) == -1) {
+            printf("%s\t%d\n", symtab[i].symbol, symtab[i].address);
+        }
+    }
+
+    printf("\n");
+    printf("Literal Table:\n");
+    for (int i = 0; i <= litcount; i++) {
+        printf("%s\t%d\n", litt[i].literal, litt[i].address);
+    }   
+    
+
+        machineCode = fopen("machineCode.txt", "r");
+    if (!machineCode) {
+        printf("Error reopening machine code file for printing!\n");
+        return 1;
+    }
+
+    printf("\nMachine Code:\n");
+    while (fgets(line, sizeof(line), machineCode)) {
+        printf("%s", line);
+    }
+    fclose(machineCode);
+
+    return 0;
+}
+
+
+
+machine code:
+100 01 100
+100 01 50
+101 02 0
+102 10  101
+103 01 1 114
+104 02 1 101
+105 01 2 0
+106 03 2 0
+107 08 2 114
+108 07  108
+109 03 1 115
+110 02 2 101
+111 03 2 115
+112 07  108
+113 09  102
+
+_____________________________________________________________________________
+
+macro:
+input.txt:
+MACRO
+INC &ARG1
+LDA &ARG1
+ADD #1
+STA &ARG1
+MEND
+START 100
+   INC A 
+   HLT
+A  DC 5
+B  DC 10
+END
+
+
+mnt table:
+INC	1
+
+mdt table:
+LDA &ARG1
+ADD #1
+STA &ARG1
+MEND
+
+intermediate.txt:
+START 100
+   INC A 
+   HLT
+A  DC 5
+B  DC 10
+END
+
+mac1.c:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_MNT 50
+#define MAX_MDT 100
+#define MAX_ALA 10
+
+typedef struct {
+    char name[10];
+    int mdtIndex; 
+} MNTEntry;
+
+typedef struct {
+    char definition[50];
+} MDTEntry;
+
+MNTEntry MNT[MAX_MNT];  
+MDTEntry MDT[MAX_MDT];  
+int mntCount = 0, mdtCount = 1;
+
+void storeMacroDefinition(char *line) {
+    strcpy(MDT[mdtCount++].definition, line);
+}
+
+void processMacroDefinition(FILE *input, FILE *nonMacroFile) {
+    char line[100], macroName[10];
+
+    while (fgets(line, sizeof(line), input)) {
+        if (strstr(line, "MACRO")) {
+            fscanf(input, "%s", macroName);  
+            strcpy(MNT[mntCount].name, macroName);
+            MNT[mntCount].mdtIndex = mdtCount;
+            mntCount++;
+
+            fgets(line, sizeof(line), input); 
+
+            while (fgets(line, sizeof(line), input)) {
+                if (strstr(line, "MEND")) {
+                    storeMacroDefinition(line);  
+                    break;
+                }
+                storeMacroDefinition(line);  
+            }
+        } else {
+            fprintf(nonMacroFile, "%s", line);  // Write non-macro lines to nput.txt
+        }
+    }
+}
+
+void saveTables() {
+    FILE *mntFile = fopen("MNT.txt", "w");
+    FILE *mdtFile = fopen("MDT.txt", "w");
+
+    if (!mntFile || !mdtFile) {
+        printf("Error opening file for saving tables.\n");
+        return;
+    }
+
+    for (int i = 0; i < mntCount; i++) {
+        fprintf(mntFile, "%s\t%d\n", MNT[i].name, MNT[i].mdtIndex);
+    }
+
+    for (int i = 0; i < mdtCount; i++) {
+        fprintf(mdtFile, "%s", MDT[i].definition);
+    }
+
+    fclose(mntFile);
+    fclose(mdtFile);
+}
+
+int main() {
+    FILE *input = fopen("input.txt", "r");
+    FILE *nonMacroFile = fopen("intermediate.txt", "w");  
+
+    if (!input || !nonMacroFile) {
+        printf("Error opening file.\n");
+        return 1;
+    }
+
+    processMacroDefinition(input, nonMacroFile);
+
+    fclose(input);
+    fclose(nonMacroFile);
+
+    saveTables();  
+    
+    return 0;
+}
+
+
+mac2.c:
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+
+typedef struct {
+    char name[10];
+    int mdtIndex; 
+}mntet;
+
+typedef struct {
+    char definition[50]; 
+}mdtet;
+
+mntet mnt[50];  
+mdtet mdt[100];  
+char ALA[10][10]; 
+char bl[10][10]; 
+int xc[10];
+int mntCount = 0, mdtCount = 0;
+int alaIndex = 0, c = 0, f = 0;
+
+void trimWhitespace(char *str) {
+    char *end;
+    while (isspace((unsigned char)*str)) str++; 
+    end = str + strlen(str);
+    while (end > str && isspace((unsigned char)*(end - 1))) end--; 
+    *end = '\0'; 
+}
+
+int ca(int i) {
+    for (int z = 0; z < alaIndex; z++) {
+        if (strcmp(bl[z], ALA[z]) != 0) {
+            xc[z] = i;
+            return z;
+        } else if (xc[z] == i) {
+            return z;
+        }
+    }
+}
+
+void lt() {
+    FILE *mntFile = fopen("MNT.txt", "r");
+    FILE *mdtFile = fopen("MDT.txt", "r");
+
+
+
+    while (fscanf(mntFile, "%s %d", mnt[mntCount].name, &mnt[mntCount].mdtIndex) != EOF) {
+        mntCount++;
+    }
+    while (fgets(mdt[mdtCount].definition, sizeof(mdt[mdtCount].definition), mdtFile)) {
+        trimWhitespace(mdt[mdtCount].definition); 
+        mdtCount++;
+    }
+
+    fclose(mntFile);
+    fclose(mdtFile);
+}
+
+int evaluateCondition(char *condition) {
+    char arg[10], op[3], value[10];
+    sscanf(condition, "&%s %s %s", arg, op, value);  
+    printf("sfds%s %s %s\n",arg,op,value);
+    //printf("sfds%s\n",condition);
+    for (int i = 0; i < 10; i++) {
+        if (strcmp(ALA[i], value) == 0 && strcmp(op, "EQ") == 0) {
+            return 1; 
+        }
+    }
+    return 0;  
+}
+
+void sag(char *line, FILE *output) {
+    char resultLine[100] = "";
+    int cnt = 0;
+    int foundSubstitution = 0;
+
+    printf("sfl: '%s'\n", line);
+
+    for (int i = 0; i < 10; i++) {
+        char formalParam[6];
+        sprintf(formalParam, "&ARG%d", i + 1);  
+
+        char *argPos = strstr(line, formalParam);  
+        if (argPos != NULL) {
+            if (f == 0) {
+                strcpy(bl[c], ALA[c]);
+                xc[c] = i + 1;
+                cnt = 0;
+                c++;
+                f = 1;
+            } else {
+                cnt = ca(i + 1);
+                strcpy(bl[c], ALA[c]);
+                c++;
+            }
+
+            printf("subt '%s' with '%s' %d\n", formalParam, ALA[cnt], cnt); 
+            strncat(resultLine, line, argPos - line); 
+            strcat(resultLine, ALA[cnt]);
+            strcat(resultLine, argPos + strlen(formalParam)); 
+            strcpy(line, resultLine);
+        }
+    }
+
+    printf("ALA:\n");
+    for (int j = 0; j < 5; j++) {
+        printf("ALA[%d]: '%s'\n", j, ALA[j]);
+    }
+
+    if (!foundSubstitution) {
+        strcpy(resultLine, line); 
+    }
+
+    printf("Fls: '%s'\n", resultLine);
+    fprintf(output, "%s\n", resultLine);
+}
+
+int isMacro(char *name) {
+    for (int i = 0; i < mntCount; i++) {
+        if (strcmp(name, mnt[i].name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int findMDT(char *macroName) {
+    for (int i = 0; i < mntCount; i++) {
+        if (strcmp(mnt[i].name, macroName) == 0) {
+            return mnt[i].mdtIndex;
+        }
+    }
+    return -1;
+}
+
+int findLabelInMDT(char *label) {
+    for (int i = 0; i < mdtCount; i++) {
+        if (strncmp(mdt[i].definition, label, strlen(label)) == 0 && 
+            (mdt[i].definition[strlen(label)] == ' ' || mdt[i].definition[strlen(label)] == '\0')) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void expandMacro(char *macroName, char *line, FILE *output) {
+    char actualArgs[100];
+    strcpy(actualArgs, line + strlen(macroName));
+    trimWhitespace(actualArgs);
+
+    char *arg = strtok(actualArgs, ", ");
+    while (arg != NULL && alaIndex < 10) {
+        trimWhitespace(arg);
+        int isMacro = findMDT(arg);
+        if (isMacro == -1) {
+            strcpy(ALA[alaIndex++], arg);
+        } else {
+            printf("Skipping macro name: '%s' from being added to ALA.\n", arg);
+        }
+        arg = strtok(NULL, ", ");
+    }
+
+    int mdtptr = findMDT(macroName);
+    int labelFlag = 0,cf=0;
+
+    while (mdtptr != -1 && strcmp(mdt[mdtptr].definition, "MEND") != 0) {
+        char command[10],t[20],t1[20];
+        sscanf(mdt[mdtptr].definition, "%s", command);
+        int fields=sscanf(mdt[mdtptr].definition,"%s %s ",t,t1);
+        printf("Processing mdt[%d]: '%s' %d\n", mdtptr, mdt[mdtptr].definition,fields);
+        //printf("Processing mdt[%d]: '%s' \n", mdtptr, mdt[mdtptr].definition);
+        if(fields<2 && labelFlag!=1 && cf!=1){
+            return;
+        }
+        else if (labelFlag == 1) {
+            labelFlag = 0;
+        }else if(cf ==1){
+            cf=0;
+        } else if (strcmp(command, "AIF") == 0) {
+            char condition[50], label[10],c1[50],c2[50];
+            sscanf(mdt[mdtptr].definition, "AIF %s %s %s %s", condition,c1,c2, label);
+            printf("\ndasd%s %s %s %s %s",condition,label,c1,c2);
+
+            strcat(condition," ");
+            strcat(condition,c1);
+            strcat(condition," ");
+            strcat(condition,c2);
+            printf("\ncondition:%s\n",condition);
+            if (evaluateCondition(condition)) {
+                printf("Condition '%s' is true, jumping to label '%s'.\n", condition, label);
+                mdtptr = findLabelInMDT(label);
+                if (mdtptr == -1) {
+                    printf("Error: Label '%s' not found in mdt.\n", label);
+                    break;
+                }
+                cf=1;
+                continue;
+            }
+        } else if (strcmp(command, "AGO") == 0) {
+            char label[10];
+            sscanf(mdt[mdtptr].definition, "AGO %s", label);
+            printf("Jumping to label '%s'.\n", label);
+            mdtptr = findLabelInMDT(label);
+            labelFlag = 1;
+            if (mdtptr == -1) {
+                printf("Error: Label '%s' not found in mdt.\n", label);
+                break;
+            }
+            continue;
+        } else if (strcmp(command, "ANOP") == 0) {
+            printf("ANOP encountered, skipping this line.\n");
+            mdtptr++;
+            continue;
+        } else {
+            char nmn[10];
+            sscanf(mdt[mdtptr].definition, "%s", nmn);
+            if (findMDT(nmn) != -1) {
+                printf("nested macro: '%s'\n", nmn);
+                expandMacro(nmn, mdt[mdtptr].definition, output);
+            } else {
+                sag(mdt[mdtptr].definition, output);
+            }
+        }
+        mdtptr++;
+    }
+
+    if (strcmp(mdt[mdtptr].definition, "MEND") == 0) {
+        printf("Finished macro: '%s'\n", macroName);
+    } else {
+        printf("mend missing !! macro '%s'.\n", macroName);
+    }
+}
+
+int main() {
+    FILE *input = fopen("intermediate.txt", "r");
+    FILE *output = fopen("output.txt", "w");
+
+    lt();
+    char line[100];
+    while (fgets(line, sizeof(line), input)) {
+        trimWhitespace(line);
+        if (strlen(line) > 0) {
+            char macroName[10];
+            sscanf(line, "%s", macroName);
+            if (isMacro(macroName)) {
+                expandMacro(macroName, line, output);
+            } else {
+                fprintf(output, "%s\n", line);
+            }
+        }
+    }
+
+    fclose(input);
+    fclose(output);
+    return 0;
+}
+
+
+
+output.txt:
+START 100
+ADD #1
+STA A
+   HLT
+A  DC 5
+B  DC 10
+END
+
+
+lexical:
+
+lex.c
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdlib.h>
+
+const char *keywords[] = {
+    "auto", "break", "case", "char", "const", "continue", "default", "do",
+    "double", "else", "enum", "extern", "float", "for", "goto", "if",
+    "int", "long", "register", "return", "short", "signed", "sizeof",
+    "static", "struct", "switch", "typedef", "union", "unsigned", "void",
+    "volatile", "while"
+};
+
+
+int isKeyword(char *word) {
+    for (int i = 0; i < sizeof(keywords) / sizeof(char *); i++) {
+        if (strcmp(word, keywords[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+int isOperator(char ch) {
+    return ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%' ||
+           ch == '=' || ch == '<' || ch == '>' || ch == '!' || ch == '&' || 
+           ch == '|' || ch == '^' || ch == '~';
+}
+
+
+int isPunctuation(char ch) {
+    return ch == ';' || ch == ',' || ch == '(' || ch == ')' || ch == '{' ||
+           ch == '}' || ch == '[' || ch == ']' || ch == '#';
+}
+
+
+void processLine(char *line) {
+    char token[100];
+    int i = 0, j = 0;
+    while (line[i] != '\0') {
+        
+        if (isspace(line[i])) {
+            i++;
+            continue;
+        }
+
+        
+        if (isalpha(line[i]) || line[i] == '_') {
+            j = 0;
+            while (isalnum(line[i]) || line[i] == '_') {
+                token[j++] = line[i++];
+            }
+            token[j] = '\0';
+            if (isKeyword(token)) {
+                printf("Keyword: %s\n", token);
+            } else {
+                printf("Identifier: %s\n", token);
+            }
+        }
+        
+        else if (isdigit(line[i])) {
+            j = 0;
+            while (isdigit(line[i])) {
+                token[j++] = line[i++];
+            }
+            token[j] = '\0';
+            printf("Integer Constant: %s\n", token);
+        }
+        
+        else if (isOperator(line[i])) {
+            printf("Operator: %c\n", line[i]);
+            i++;
+        }
+        
+        else if (line[i] == '\"') {
+            j = 0;
+            token[j++] = line[i++]; 
+            while (line[i] != '\"' && line[i] != '\0') {
+                token[j++] = line[i++];
+            }
+            if (line[i] == '\"') {
+                token[j++] = line[i++]; 
+                token[j] = '\0';
+                printf("String Literal: %s\n", token);
+            }
+        }
+        
+        else if (isPunctuation(line[i])) {
+            printf("Punctuation: %c\n", line[i]);
+            i++;
+        }
+        else {
+            i++; 
+        }
+    }
+}
+
+int main() {
+    FILE *input = fopen("sample.c", "r");
+    if (!input) {
+        printf("Error: Could not open file.\n");
+        return 1;
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), input)) {
+        processLine(line);
+    }
+
+    fclose(input);
+    return 0;
+}
+
+
+sample.c:
+#include<stdio.h>
+
+int main(){
+    printf("SP Assignment 7");
+    return 0;
+}
+
+
+
+or else:
+
+
+
+
+#include <ctype.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_LENGTH 100
+
+
+bool isDelimiter(char chr)
+{
+    return (chr == ' ' || chr == '+' || chr == '-'
+            || chr == '*' || chr == '/' || chr == ','
+            || chr == ';' || chr == '%' || chr == '>'
+            || chr == '<' || chr == '=' || chr == '('
+            || chr == ')' || chr == '[' || chr == ']'
+            || chr == '{' || chr == '}');
+}
+
+// this function check for a valid identifier eg:- +,-* etc
+bool isOperator(char chr)
+{
+    return (chr == '+' || chr == '-' || chr == '*'
+            || chr == '/' || chr == '>' || chr == '<'
+            || chr == '=');
+}
+
+// this function check for an valid identifier
+bool isValidIdentifier(char* str)
+{
+    return (str[0] != '0' && str[0] != '1' && str[0] != '2'
+            && str[0] != '3' && str[0] != '4'
+            && str[0] != '5' && str[0] != '6'
+            && str[0] != '7' && str[0] != '8'
+            && str[0] != '9' && !isDelimiter(str[0]));
+}
+
+// 32 Keywords are checked in this function and return the
+// result accordingly
+bool isKeyword(char* str)
+{
+    const char* keywords[]
+        = { "auto",     "break",    "case",     "char",
+            "const",    "continue", "default",  "do",
+            "double",   "else",     "enum",     "extern",
+            "float",    "for",      "goto",     "if",
+            "int",      "long",     "register", "return",
+            "short",    "signed",   "sizeof",   "static",
+            "struct",   "switch",   "typedef",  "union",
+            "unsigned", "void",     "volatile", "while" };
+    for (int i = 0;
+         i < sizeof(keywords) / sizeof(keywords[0]); i++) {
+        if (strcmp(str, keywords[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// check for an integer value
+bool isInteger(char* str)
+{
+    if (str == NULL || *str == '\0') {
+        return false;
+    }
+    int i = 0;
+    while (isdigit(str[i])) {
+        i++;
+    }
+    return str[i] == '\0';
+}
+
+// trims a substring from a given string's start and end
+// position
+char* getSubstring(char* str, int start, int end)
+{
+    int length = strlen(str);
+    int subLength = end - start + 1;
+    char* subStr
+        = (char*)malloc((subLength + 1) * sizeof(char));
+    strncpy(subStr, str + start, subLength);
+    subStr[subLength] = '\0';
+    return subStr;
+}
+
+// this function parse the input
+int lexicalAnalyzer(char* input)
+{
+    int left = 0, right = 0;
+    int len = strlen(input);
+
+    while (right <= len && left <= right) {
+        if (!isDelimiter(input[right]))
+            right++;
+
+        if (isDelimiter(input[right]) && left == right) {
+            if (isOperator(input[right]))
+                printf("Token: Operator, Value: %c\n",
+                       input[right]);
+
+            right++;
+            left = right;
+        }
+        else if (isDelimiter(input[right]) && left != right
+                 || (right == len && left != right)) {
+            char* subStr
+                = getSubstring(input, left, right - 1);
+
+            if (isKeyword(subStr))
+                printf("Token: Keyword, Value: %s\n",
+                       subStr);
+
+            else if (isInteger(subStr))
+                printf("Token: Integer, Value: %s\n",
+                       subStr);
+
+            else if (isValidIdentifier(subStr)
+                     && !isDelimiter(input[right - 1]))
+                printf("Token: Identifier, Value: %s\n",
+                       subStr);
+
+            else if (!isValidIdentifier(subStr)
+                     && !isDelimiter(input[right - 1]))
+                printf("Token: Unidentified, Value: %s\n",
+                       subStr);
+            left = right;
+        }
+    }
+    return 0;
+}
+
+// main function
+int main()
+{
+    // Input 01
+    char lex_input[MAX_LENGTH] = "int a = b + c";
+    printf("For Expression \"%s\":\n", lex_input);
+    lexicalAnalyzer(lex_input);
+    printf(" \n");
+    // Input 02
+    char lex_input01[MAX_LENGTH]
+        = "int x=ab+bc+30+switch+ 0y ";
+    printf("For Expression \"%s\":\n", lex_input01);
+    lexicalAnalyzer(lex_input01);
+    return (0);
+}
+
+
+
+
+
+pass1 in case:
+
+
+or:
+pass1.c:
+
+input.txt:
+START 100
+A DC '5'
+B DS 1
+MOVER AREG, ='5'
+ADD BREG, ='1'
+LTORG
+SUB CREG, ='10'
+MULT DREG, ='2'
+END
+
+
+opcode_table.txt:
+MOVER 01
+MOVEM 02
+ADD 03
+SUB 04
+MULT 05
+DIV 06
+BC 07
+COMP 08
+PRINT 09
+READ 10
+
+
+intermedeiate_code.txt:
+Intermediate Code:
+100 (AD,01) (C,100)
+100 (DL,01) (C,'5')
+101 (DL,02) (C,1)
+102 (IS,06) (L,1)
+103 (IS,06) (L,2)
+104 (DL,02) (L,01)
+105 (DL,02) (L,02)
+106 (AD,03)
+106 (IS,06) (L,3)
+107 (IS,06) (L,4)
+108 (DL,02) (L,03)
+109 (DL,02) (L,04)
+110 (AD,02)
+
+literal table:
+
+Literal Table:
+='5'	104
+='1'	105
+='10'	108
+='2'	109
+
+
+pool table:
+Pool Table:
+0
+2
+
+symbol table:
+
+Symbol Table:
+A	100
+B	101
+
+
+pass1.c:
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define MAX_SYMBOLS 100
+#define MAX_LITERALS 100
+#define MAX_POOLS 10
+#define MAX_CODE_LINES 100
+#define MAX_OPCODES 50
+
+// Data Structures
+typedef struct {
+    char symbol[10];
+    int address;
+} Symbol;
+
+typedef struct {
+    char literal[10];
+    int address;
+} Literal;
+
+typedef struct {
+    int start_idx;
+} Pool;
+
+typedef struct {
+    char mnemonic[10];
+    char type[3];  // Instruction type (IS/AD/DL)
+    int code;      // Instruction code
+} Opcode;
+
+// Global Tables
+Symbol symtab[MAX_SYMBOLS];
+int symtab_count = 0;
+Literal littab[MAX_LITERALS];
+int littab_count = 0;
+Pool pooltab[MAX_POOLS];
+int pooltab_count = 1;
+char intermediate_code[MAX_CODE_LINES][50];
+int intermediate_count = 0;
+Opcode optab[MAX_OPCODES];
+int optab_count = 0;
+int location_counter = 0;
+
+// Function to add a symbol to the symbol table
+void add_symbol(char *symbol, int address) {
+    strcpy(symtab[symtab_count].symbol, symbol);
+    symtab[symtab_count].address = address;
+    symtab_count++;
+}
+
+// Function to add a literal to the literal table
+void add_literal(char *literal) {
+    strcpy(littab[littab_count].literal, literal);
+    littab[littab_count].address = -1; // Address will be assigned during LTORG or END
+    littab_count++;
+}
+
+// Function to load the opcode table from a file
+void load_opcode_table(char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if (fp == NULL) {
+        printf("Error: Cannot open opcode table file\n");
+        exit(1);
+    }
+
+    char mnemonic[10], type[3];
+    int code;
+    while (fscanf(fp, "%s %s %d", mnemonic, type, &code) != EOF) {
+        strcpy(optab[optab_count].mnemonic, mnemonic);
+        strcpy(optab[optab_count].type, type);
+        optab[optab_count].code = code;
+        optab_count++;
+    }
+
+    fclose(fp);
+}
+
+// Function to search for opcode in the opcode table
+Opcode* search_opcode(char *mnemonic) {
+	int i;
+    for (i = 0; i < optab_count; i++) {
+        if (strcmp(optab[i].mnemonic, mnemonic) == 0) {
+            return &optab[i];
+        }
+    }
+    return NULL;
+}
+
+void process_line(char *line) {
+    char token1[10], token2[10], token3[10];
+    int i;
+    sscanf(line, "%s %s %s", token1, token2, token3);
+
+    if (strcmp(token1, "START") == 0) {
+        location_counter = atoi(token2);
+        sprintf(intermediate_code[intermediate_count++], "%02d (AD,01) (C,%02d)", location_counter, location_counter);
+    } else if (strcmp(token1, "END") == 0) {
+        for (i = pooltab[pooltab_count - 1].start_idx; i < littab_count; i++) {
+            littab[i].address = location_counter;
+            sprintf(intermediate_code[intermediate_count++], "%02d (DL,02) (L,%02d)", location_counter, i+1);
+            location_counter++;
+        }
+        sprintf(intermediate_code[intermediate_count++], "%02d (AD,02)", location_counter);
+    } else if (strcmp(token1, "LTORG") == 0) {
+        for (i = pooltab[pooltab_count - 1].start_idx; i < littab_count; i++) {
+            littab[i].address = location_counter;
+            sprintf(intermediate_code[intermediate_count++], "%02d (DL,02) (L,%02d)", location_counter, i+1);
+            location_counter++;
+        }
+        pooltab[pooltab_count++].start_idx = littab_count;
+        sprintf(intermediate_code[intermediate_count++], "%02d (AD,03)", location_counter);
+    } else if (strcmp(token2, "DC") == 0) {
+        add_symbol(token1, location_counter);
+        sprintf(intermediate_code[intermediate_count++], "%02d (DL,01) (C,%s)", location_counter, token3);
+        location_counter++;
+    } else if (strcmp(token2, "DS") == 0) {
+        add_symbol(token1, location_counter);
+        int size = atoi(token3);
+        sprintf(intermediate_code[intermediate_count++], "%02d (DL,02) (C,%d)", location_counter, size);
+        location_counter += size;
+    } else {
+        Opcode *opcode = search_opcode(token1);
+        if (opcode != NULL) {
+            if (token3[0] == '=') {
+                add_literal(token3);
+                sprintf(intermediate_code[intermediate_count++], "%02d (IS,%02d) (L,%d)", location_counter, opcode->code, littab_count);
+            } else {
+                sprintf(intermediate_code[intermediate_count++], "%02d (IS,%02d) (S,%d)", location_counter, opcode->code, symtab_count);
+            }
+            location_counter++;
+        } else if (token1[0] == '=') {
+            add_literal(token1);
+            sprintf(intermediate_code[intermediate_count++], "%02d (L,%d)", location_counter, littab_count);
+        } else {
+            printf("Error: Undefined instruction %s\n", token1);
+        }
+    }
+}
+
+
+
+// Function to display the symbol, literal, pool, and intermediate tables in separate files
+void display_tables(char *symbol_file, char *literal_file, char *pool_file, char *intermediate_file) {
+    FILE *symbol_output = fopen(symbol_file, "w");
+    FILE *literal_output = fopen(literal_file, "w");
+    FILE *pool_output = fopen(pool_file, "w");
+    FILE *intermediate_output = fopen(intermediate_file, "w");
+    int i;
+
+    if (symbol_output == NULL || literal_output == NULL || pool_output == NULL || intermediate_output == NULL) {
+        printf("Error: Cannot open one or more output files\n");
+        return;
+    }
+
+    // Symbol Table
+    fprintf(symbol_output, "Symbol Table:\n");
+    for (i = 0; i < symtab_count; i++) {
+        fprintf(symbol_output, "%s\t%d\n", symtab[i].symbol, symtab[i].address);
+    }
+
+    // Literal Table
+    fprintf(literal_output, "Literal Table:\n");
+    for (i = 0; i < littab_count; i++) {
+        fprintf(literal_output, "%s\t%d\n", littab[i].literal, littab[i].address);
+    }
+
+    // Pool Table
+    fprintf(pool_output, "Pool Table:\n");
+    for (i = 0; i < pooltab_count; i++) {
+        fprintf(pool_output, "%d\n", pooltab[i].start_idx);
+    }
+
+    // Intermediate Code
+    fprintf(intermediate_output, "Intermediate Code:\n");
+    for (i = 0; i < intermediate_count; i++) {
+        fprintf(intermediate_output, "%s\n", intermediate_code[i]);
+    }
+
+    // Close all files
+    fclose(symbol_output);
+    fclose(literal_output);
+    fclose(pool_output);
+    fclose(intermediate_output);
+}
+
+int main(int argc, char *argv[]) {
+    char input_file[50] = "input.txt";       // Default input file
+    char opcode_file[50] = "opcode_table.txt"; // Default opcode table file
+    char symbol_file[50] = "symbol_table.txt";  // Default symbol table file
+    char literal_file[50] = "literal_table.txt";  // Default literal table file
+    char pool_file[50] = "pool_table.txt";  // Default pool table file
+    char intermediate_file[50] = "intermediate_code.txt";  // Default intermediate code file
+
+    // If command-line arguments are provided, override default input and output files
+    if (argc >= 2) {
+        strcpy(input_file, argv[1]);
+    }
+    if (argc >= 3) {
+        strcpy(opcode_file, argv[2]);
+    }
+    if (argc >= 4) {
+        strcpy(symbol_file, argv[3]);
+    }
+    if (argc >= 5) {
+        strcpy(literal_file, argv[4]);
+    }
+    if (argc >= 6) {
+        strcpy(pool_file, argv[5]);
+    }
+    if (argc >= 7) {
+        strcpy(intermediate_file, argv[6]);
+    }
+
+    // Load the opcode table
+    load_opcode_table(opcode_file);
+
+    FILE *input = fopen(input_file, "r");
+
+    if (input == NULL) {
+        printf("Error: Cannot open input file\n");
+        return 1;
+    }
+
+    // Read source code from the input file and process each line
+    char line[50];
+    while (fgets(line, sizeof(line), input) != NULL) {
+        process_line(line);
+    }
+
+    fclose(input);
+
+    // Display all tables and intermediate code to respective files
+    display_tables(symbol_file, literal_file, pool_file, intermediate_file);
+
+    return 0;
+}
+
+
+
+
+
+
+
